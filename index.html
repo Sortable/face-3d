@@ -1,32 +1,32 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Khuôn mặt 3D</title>
+<title>Pixel 3D Khuôn Mặt</title>
 <style>
   :root { --accent:#5eead4; --text:#e8eefc; }
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body { height:100%; }
   body {
     font-family: 'Segoe UI', system-ui, sans-serif;
-    background: radial-gradient(1200px 800px at 50% 20%, #101a33, #070b18 70%);
+    background: radial-gradient(1200px 800px at 50% 18%, #16264d, #070b18 72%);
     color: var(--text);
     overflow: hidden;
   }
   #c { position:fixed; inset:0; display:block; }
   #ui {
-    position:fixed; top:24px; left:50%; transform:translateX(-50%);
+    position:fixed; top:22px; left:50%; transform:translateX(-50%);
     text-align:center; z-index:10; pointer-events:none;
-    display:flex; flex-direction:column; align-items:center; gap:10px;
+    display:flex; flex-direction:column; align-items:center; gap:9px;
   }
   #ui h1 { font-size:22px; font-weight:600; letter-spacing:.5px; }
   #ui p { font-size:13px; opacity:.65; }
-  #buttons { display:flex; gap:8px; pointer-events:auto; }
+  #buttons { display:flex; gap:8px; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
   #buttons button {
     border:1px solid rgba(94,234,212,.35);
     background:rgba(15,23,42,.6); color:var(--text);
-    padding:9px 16px; border-radius:999px; font-size:13px; cursor:pointer;
+    padding:9px 15px; border-radius:999px; font-size:13px; cursor:pointer;
     backdrop-filter: blur(6px); transition: all .15s;
   }
   #buttons button:hover { background:rgba(94,234,212,.15); }
@@ -46,10 +46,11 @@
 <body>
 <canvas id="c"></canvas>
 <div id="ui">
-  <h1>Khuôn mặt 3D</h1>
+  <h1>Pixel 3D Khuôn Mặt</h1>
   <p>Kéo chuột để xoay &nbsp;·&nbsp; lăn để phóng to / thu nhỏ</p>
   <div id="buttons">
-    <button id="btnPhoto" class="active">Ảnh 3D</button>
+    <button id="btnPixel" class="active">Pixel 3D</button>
+    <button id="btnPhoto">Ảnh 3D</button>
     <button id="btnMesh">Lưới khuôn mặt 3D</button>
   </div>
   <div id="status"></div>
@@ -65,16 +66,16 @@ document.getElementById('fallbackImg').src = IMG_SRC;
 
 const canvas = document.getElementById('c');
 const statusEl = document.getElementById('status');
+const btnPixel = document.getElementById('btnPixel');
 const btnPhoto = document.getElementById('btnPhoto');
 const btnMesh = document.getElementById('btnMesh');
 
 let THREE;
 let renderer, scene, camera, controls, currentGroup, texture;
-let photoMode = true;
 let landmarker = null;
 
 function setStatus(s){ statusEl.textContent = s || ''; }
-function setActive(btn){ btnPhoto.classList.toggle('active', btn === btnPhoto); btnMesh.classList.toggle('active', btn === btnMesh); }
+function setActive(btn){ [btnPixel, btnPhoto, btnMesh].forEach(b => b.classList.toggle('active', b === btn)); }
 
 function clearGroup(){
   while(currentGroup.children.length){
@@ -90,7 +91,6 @@ function clearGroup(){
 
 function showPhoto(){
   setActive(btnPhoto);
-  photoMode = true;
   clearGroup();
   const iw = texture && texture.image ? texture.image.width : 1000;
   const ih = texture && texture.image ? texture.image.height : 1000;
@@ -162,7 +162,6 @@ function buildFaceMesh(lms){
 
 async function showFaceMesh(){
   setActive(btnMesh);
-  photoMode = false;
   clearGroup();
   setStatus('Đang nhận diện khuôn mặt…');
   try {
@@ -194,6 +193,60 @@ async function showFaceMesh(){
   }
 }
 
+function buildPixelMesh(img){
+  const W = 72;
+  const H = Math.max(1, Math.round(W * img.height / img.width));
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, W, H);
+  const data = ctx.getImageData(0, 0, W, H).data;
+
+  const targetW = 3.0;
+  const cell = targetW / W;
+  const maxDepth = 0.3;
+  const count = W * H;
+
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.05 });
+  const mesh = new THREE.InstancedMesh(geo, mat, count);
+  mesh.frustumCulled = false;
+
+  const color = new THREE.Color();
+  const m = new THREE.Matrix4();
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+
+  for(let y = 0; y < H; y++){
+    for(let x = 0; x < W; x++){
+      const i = (y * W + x) * 4;
+      const r = data[i] / 255, g = data[i+1] / 255, b = data[i+2] / 255;
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const h = (0.04 + Math.pow(lum, 1.7) * 0.96) * maxDepth;
+      color.setRGB(r, g, b);
+      mesh.setColorAt(x + y * W, color);
+      pos.set((x - (W - 1) / 2) * cell, ((H - 1) / 2 - y) * cell, h / 2 - maxDepth / 2);
+      scl.set(cell * 0.94, cell * 0.94, h);
+      m.compose(pos, quat, scl);
+      mesh.setMatrixAt(x + y * W, m);
+    }
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  currentGroup.add(mesh);
+}
+
+function showPixel(){
+  setActive(btnPixel);
+  clearGroup();
+  setStatus('Đang tạo Pixel 3D…');
+  const img = new Image();
+  img.onload = () => { buildPixelMesh(img); setStatus(''); };
+  img.onerror = () => setStatus('Không đọc được ảnh.');
+  img.src = IMG_SRC;
+}
+
 function onResize(){
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -214,43 +267,58 @@ async function boot(){
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
 
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 50);
-    camera.position.set(0, 0, 3.4);
+    camera.position.set(0, 0, 3.6);
 
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.autoRotate = true;
-    controls.autoRotateSpeed = 1.4;
+    controls.autoRotateSpeed = 1.5;
     controls.minDistance = 1.2;
     controls.maxDistance = 8;
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-    const key = new THREE.DirectionalLight(0xffffff, 1.4);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x22304a, 0.5));
+    const key = new THREE.DirectionalLight(0xffffff, 1.6);
     key.position.set(2, 3, 4);
     scene.add(key);
-    const rim = new THREE.DirectionalLight(0x5eead4, 0.8);
+    const rim = new THREE.DirectionalLight(0x5eead4, 0.9);
     rim.position.set(-3, -1, -2);
     scene.add(rim);
+
+    const starGeo = new THREE.BufferGeometry();
+    const starCount = 400;
+    const starPos = new Float32Array(starCount * 3);
+    for(let i = 0; i < starCount; i++){
+      starPos[i*3]   = (Math.random() - 0.5) * 20;
+      starPos[i*3+1] = (Math.random() - 0.5) * 20;
+      starPos[i*3+2] = (Math.random() - 0.5) * 20;
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x9adfff, size: 0.03, transparent: true, opacity: 0.6 })));
 
     currentGroup = new THREE.Group();
     scene.add(currentGroup);
 
     texture = new THREE.TextureLoader().load(IMG_SRC, (t) => {
       t.colorSpace = THREE.SRGBColorSpace;
-      if(photoMode) showPhoto();
+      if(btnPhoto.classList.contains('active')) showPhoto();
     });
 
     window.addEventListener('resize', onResize);
     animate();
-    showPhoto();
+    showPixel();
   } catch(e){
     document.getElementById('fallback').style.display = 'flex';
   }
 }
 
+btnPixel.addEventListener('click', showPixel);
 btnPhoto.addEventListener('click', showPhoto);
 btnMesh.addEventListener('click', showFaceMesh);
 boot();
